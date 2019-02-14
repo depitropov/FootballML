@@ -1,16 +1,14 @@
 #!/usr/bin/python3
 from psycopg2 import sql
 import pandas as pd
-import numpy as np
 import time
-from profilehooks import profile
 
 
 def set_last_matches(matches, conn, count=5):
     """
     Get last &count matches of both teams.
     :param matches: pd dataframe with all matches
-    :param conn: DataBase connection object
+    :param conn: DataManagement connection object
     :param count: Number of last matches to index
     :return: True; Writes matches to a bridge table matches_&count_previous
     """
@@ -31,7 +29,9 @@ def set_last_matches(matches, conn, count=5):
     t0 = time.perf_counter()
     for i, match in matches.iterrows():
         for side in ('home_team', 'away_team'):
-            last_matches = pd.read_sql_query("SELECT match_id FROM matches WHERE {0} = '{1}' AND date < '{2}' ORDER BY date DESC LIMIT {3}"
+            last_matches = pd.read_sql_query("SELECT match_id FROM matches "
+                                             "WHERE {0} = '{1}' AND date < '{2}' "
+                                             "ORDER BY date DESC LIMIT {3}"
                                              .format(side, match[side_col[side]], match[0], count),
                                              conn,
                                              index_col='match_id',
@@ -49,12 +49,11 @@ def set_last_matches(matches, conn, count=5):
     return True
 
 
-
 def set_last_matches_sql(matches, conn, count=5):
     """
     Get last &count matches of both teams.
     :param matches: pd dataframe with all matches
-    :param conn: DataBase connection object
+    :param conn: DataManagement connection object
     :param count: Number of last matches to index
     :return: True; Writes matches to a bridge table matches_&count_previous
     """

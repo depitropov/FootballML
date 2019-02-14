@@ -6,15 +6,14 @@ import pandas as pd
 from os import listdir
 from multiprocessing import Pool
 
-from Football.getters import set_last_matches, set_last_matches_sql
-from Football.converters import h_d_a, country, league, convert_date
-from profilehooks import profile
+from Football.getters import set_last_matches
+#from profilehooks import profile
 
 p = Pool(7)
 datadir = 'Data'
 
 
-@profile
+#@profile
 def init_db():
     """Initiates the database. Transform and populate data from all CVS located in input folder"""
     csv_files = listdir(datadir)
@@ -72,7 +71,8 @@ def init_db():
         temp_frame.to_sql('matches', conn, if_exists='append', index=False)
     conn = psycopg2.connect(database="footdata", user="footdata")
     cur = conn.cursor()
-    cur.execute("""CREATE INDEX home_team ON matches (home_team);
+    cur.execute("""CREATE INDEX match_id ON matches (match_id);
+                CREATE INDEX home_team ON matches (home_team);
                 CREATE INDEX away_team ON matches (away_team);
                 CREATE INDEX date ON matches (date);"""
                 )
