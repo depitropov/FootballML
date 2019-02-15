@@ -2,12 +2,14 @@
 
 import pandas as pd
 import psycopg2
+import logging
+import numpy as np
 from sqlalchemy import create_engine
 from os import listdir
 from Football.getters import set_last_matches
 from DataManagement import Converters
 from multiprocessing import Pool
-import numpy as np
+from sqlalchemy.exc import IntegrityError
 
 
 class DbInitiator:
@@ -92,7 +94,8 @@ class FileImporter:
     def __init__(self, config):
         self.config = config
         self.p = Pool(self.config['processors'])
-        self.con = psycopg2.connect(database=self.config['database'], user=self.config['user'], host=self.config['host'])
+        self.con = psycopg2.connect(database=self.config['database'], user=self.config['user'],
+                                    host=self.config['host'])
         self.con_sql_alchemy = create_engine(self.config['url'])
 
     def __enter__(self):
@@ -104,30 +107,63 @@ class FileImporter:
 
     def update_countries(self, matches):
         countries = pd.read_sql_query('SELECT country_name FROM countries;', self.con)
-        matches_countries = matches[['country_id']].drop_duplicates()
+        matches_countries = matches[['country_name']].drop_duplicates()
 
-        key_diff = set(matches_countries.country_id).difference(countries.country_name)
-        where_diff = matches_countries.country_id.isin(key_diff)
+        key_diff = set(matches_countries.country_name).difference(countries.country_name)
+        where_diff = matches_countries.country_name.isin(key_diff)
 
-        # Slice TableB accordingly and append to TableA
-        countries_to_be_added = matches_countries[where_diff].rename(columns={'country_id': 'country_name'})
+        countries_to_be_added = matches_countries[where_diff]
 
         countries_to_be_added.to_sql('countries', self.con_sql_alchemy, index=False, if_exists='append')
 
-        countries_updated = pd.read_sql_query('SELECT country_name FROM countries;', self.con, index_col='country_name')
+        countries_updated = pd.read_sql_query('SELECT * FROM countries;', self.con, index_col='country_name')
 
-        matches = matches.merge(countries_updated, left_on='country_id', right_on='country_name')
-        matches = matches.drop('country_id', axis=1)
-        return matches.rename(columns={'country_name': 'country_id'})
+        matches = matches.merge(countries_updated, left_on='country_name', right_on='country_name')
+        matches = matches.drop('country_name', axis=1)
+        return matches
 
-    def update_leagues(self):
-        pass
+    def update_leagues(self, matches):
+        leagues = pd.read_sql_query('SELECT league_name FROM leagues;', self.con)
+        matches_leagues = matches[['league_name']].drop_duplicates()
 
-    def update_teams(self):
-        pass
+        key_diff = set(matches_leagues.league_name).difference(leagues.league_name)
+        where_diff = matches_leagues.league_name.isin(key_diff)
+
+        leagues_to_be_added = matches_leagues[where_diff]
+
+        leagues_to_be_added.to_sql('leagues', self.con_sql_alchemy, index=False, if_exists='append')
+
+        leagues_updated = pd.read_sql_query('SELECT * FROM leagues;', self.con, index_col='league_name')
+
+        matches = matches.merge(leagues_updated, left_on='league_name', right_on='league_name')
+        matches = matches.drop('league_name', axis=1)
+        return matches
+
+    def update_teams(self, matches):
+        team = pd.read_sql_query('SELECT team_name FROM teams;', self.con)
+        matches_teams = (matches[['home_team_name']].rename(columns={'home_team_name': 'team_name'}).append(
+            matches[['away_team_name']].rename(columns={'away_team_name': 'team_name'}), ignore_index=True)) \
+            .drop_duplicates()
+
+        key_diff = set(matches_teams.team_name).difference(team.team_name)
+        where_diff = matches_teams.team_name.isin(key_diff)
+
+        teams_to_be_added = matches_teams[where_diff]
+
+        teams_to_be_added.to_sql('teams', self.con_sql_alchemy, index=False, if_exists='append')
+
+        teams_updated = pd.read_sql_query('SELECT * FROM teams;', self.con, index_col='team_name')
+
+        matches = matches.merge(teams_updated.rename(columns={'team_id': 'home_team_id'}), left_on='home_team_name',
+                                right_on='team_name')
+
+        matches = matches.merge(teams_updated.rename(columns={'team_id': 'away_team_id'}), left_on='away_team_name',
+                                right_on='team_name')
+
+        matches = matches.drop((['home_team_name', 'away_team_name']), axis=1)
+        return matches
 
     def import_files(self):
-
         csv_files = listdir(self.config['source_directory'])
 
         converters = Converters()
@@ -156,25 +192,37 @@ class FileImporter:
                  'PSCH', 'PSCD', 'PSCA', 'BSH', 'BSD', 'BSA', 'Referee', 'GBH', 'GBA', 'GBD', 'SBH', 'SBD', 'SBA',
                  'SJH', 'SJD', 'SJA'], axis=1, inplace=True, errors='ignore')
             temp_frame.replace("", np.nan)
-
-            temp_frame.columns = ['date', 'home_team_id', 'away_team_id', 'fthg', 'ftag', 'ftr', 'hthg', 'htag', 'htr',
-                                  'b365h', 'b365d', 'b365a', 'league_id', 'country_id', 'htftr']
+            temp_frame.columns = ['date', 'home_team_name', 'away_team_name', 'fthg', 'ftag', 'ftr', 'hthg', 'htag',
+                                  'htr',
+                                  'b365h', 'b365d', 'b365a', 'league_name', 'country_name', 'htftr']
 
             matches_list_frames.append(temp_frame)
 
         matches_data_frame = pd.concat(matches_list_frames, axis=0, ignore_index=True)
 
         matches_data_frame = self.update_countries(matches_data_frame)
+        matches_data_frame = self.update_leagues(matches_data_frame)
+        matches_data_frame = self.update_teams(matches_data_frame)
 
-        matches_data_frame.to_sql('matches', self.con_sql_alchemy, if_exists='append', index=False)
+        try:
+            matches_data_frame.to_sql('matches', self.con_sql_alchemy, if_exists='append', index=False)
+        except IntegrityError as e:
+            logging.warning('Cannot import all Matches to database error: \n {0}'.format(e))
 
         cur = self.con.cursor()
-        cur.execute("""CREATE INDEX match_id ON matches (match_id);
+        cur.execute("""DROP INDEX match_id;
+                    DROP INDEX home_team_id;
+                    DROP INDEX away_team_id;
+                    DROP INDEX date;
+                    CREATE INDEX match_id ON matches (match_id);
                     CREATE INDEX home_team_id ON matches (home_team_id);
                     CREATE INDEX away_team_id ON matches (away_team_id);
-                    CREATE INDEX date ON matches (date);"""
+                    CREATE INDEX date ON matches (date);
+                    """
                     )
         self.con.commit()
+
+    def update_last_matches(self):
         matches = pd.read_sql_query('SELECT * FROM matches', self.con, index_col='match_id')
         set_last_matches(matches, self.con)
 
@@ -200,4 +248,3 @@ class FileImporter:
 
         matches.to_sql('matches', conn, if_exists='append', index=False)
         conn.close()
-
