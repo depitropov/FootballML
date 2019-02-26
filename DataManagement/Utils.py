@@ -6,7 +6,6 @@ import itertools
 from multiprocessing import Pool
 
 
-
 class Converters:
 
     leagues_dict = {'E0': 'eng_premier',

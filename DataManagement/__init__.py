@@ -1,2 +1,3 @@
 from .Utils import Converters, DbUtils
-from .DataManager import DbInitiator, FileImporter
+from .DataManager import FileImporter
+from .FeatureManager import *
