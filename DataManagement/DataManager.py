@@ -112,17 +112,24 @@ class FileImporter:
 
         self.db_getters.write_matches(matches_unique)
 
-        self.generate_features(10)
+        feature_manager = FeatureManager.FeatureCalculator()
 
-    def generate_features(self, count):
+        self.generate_features(10, feature_manager)
+
+    def generate_features(self, count, feature_manager):
         def calculate_features(row):
             last_matches_home = self.db_getters.get_previous_matches(row.home_team_id, row.date, count)
             last_matches_away = self.db_getters.get_previous_matches(row.away_team_id, row.date, count)
 
-            features_home = FeatureManager.calculate_features(last_matches_home, 'home', row.home_team_id)
-            features_away = FeatureManager.calculate_features(last_matches_away, 'away', row.away_team_id)
+            if len(last_matches_away.index) < count or len(last_matches_home.index) < count:
+                return np.nan
+
+            features_home = feature_manager.calculate_features(last_matches_home, 'home', row.home_team_id)
+            features_away = feature_manager.calculate_features(last_matches_away, 'away', row.away_team_id)
 
             return row.append(features_home).append(features_away)
 
         matches_without_features = self.db_getters.get_matches_without_features("features_last_10_matches")
-        print(matches_without_features.apply(calculate_features, axis=1))
+        features_calculated = matches_without_features.apply(calculate_features, axis=1)
+        features_cleaned = features_calculated[features_calculated.date.notnull()]
+        print(features_cleaned.columns)
