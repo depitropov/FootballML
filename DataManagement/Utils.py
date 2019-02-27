@@ -86,7 +86,12 @@ class DbUtils:
 
         df.drop_duplicates(dup_cols, keep='last', inplace=True)
 
-        df = pd.merge(df, pd.read_sql(args, engine), how='left', on=dup_cols, indicator=True)
+        database_data = pd.read_sql(args, engine)
+
+        if len(database_data.index) > 0:
+            df = pd.merge(df, pd.read_sql(args, engine), how='left', on=dup_cols, indicator=True)
+        else:
+            return df
 
         if log:
             df_with_error_records = df[df['_merge'] == 'both'][dup_cols]

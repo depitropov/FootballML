@@ -75,6 +75,7 @@ class FileImporter:
         matches_list_frames = []
 
         for csv_file in csv_files:
+            print(csv_file)
             temp_frame = pd.read_csv(('%s/{0}' % self.config['source_directory']).format(csv_file))
             temp_frame.dropna(how='all', inplace=True)  # Remove empty rows
             temp_frame.dropna(axis=1, how='all', inplace=True)  # Remove empty columns
@@ -82,7 +83,7 @@ class FileImporter:
                               inplace=True)  # Remove matches without half time or full time results
             temp_frame['league'] = temp_frame['Div']  # Create new column for league name
             temp_frame['country'] = temp_frame['Div']  # Create new column for country name
-            temp_frame.Date = self.p.map(converters.convert_date, temp_frame.Date)
+            temp_frame.Date = pd.to_datetime(temp_frame.Date, infer_datetime_format=True).astype(pd.Timestamp)
             temp_frame.country = self.p.map(converters.country, temp_frame.country)
             temp_frame.league = self.p.map(converters.league, temp_frame.league)
             temp_frame.HTR = self.p.map(converters.h_d_a, temp_frame.HTR)
@@ -94,7 +95,7 @@ class FileImporter:
                  'VCD', 'VCA', 'Bb1X2', 'BbMxH', 'BbAvH', 'BbMxD', 'BbAvD', 'BbMxA', 'BbAvA', 'BbOU', 'BbMx>2.5',
                  'BbAv>2.5', 'BbMx<2.5', 'BbAv<2.5', 'BbAH', 'BbAHh', 'BbMxAHH', 'BbAvAHH', 'BbMxAHA', 'BbAvAHA',
                  'PSCH', 'PSCD', 'PSCA', 'BSH', 'BSD', 'BSA', 'Referee', 'GBH', 'GBA', 'GBD', 'SBH', 'SBD', 'SBA',
-                 'SJH', 'SJD', 'SJA'], axis=1, inplace=True, errors='ignore')
+                 'SJH', 'SJD', 'SJA', 'HFKC', 'AFKC'], axis=1, inplace=True, errors='ignore')
             temp_frame.replace("", np.nan)
             temp_frame.columns = ['date', 'home_team_name', 'away_team_name', 'fthg', 'ftag', 'ftr', 'hthg', 'htag',
                                   'htr',
@@ -114,7 +115,7 @@ class FileImporter:
 
         feature_manager = FeatureManager.FeatureCalculator()
 
-        self.generate_features(10, feature_manager)
+        #self.generate_features(10, feature_manager)
 
     def generate_features(self, count, feature_manager):
         def calculate_features(row):
