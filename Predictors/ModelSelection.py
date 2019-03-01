@@ -1,11 +1,9 @@
 #! /usr/bin/python3
 
-from Tools.getdata import get_data
-
 
 from sklearn import model_selection
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.linear_model import LogisticRegression, SGDClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC

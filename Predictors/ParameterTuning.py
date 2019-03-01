@@ -1,10 +1,6 @@
 #! /usr/bin/env python
 from __future__ import print_function
 
-from Tools.getdata import get_data_db, get_data_csv
-
-import numpy as np
-
 from time import time
 from operator import itemgetter
 
@@ -12,7 +8,6 @@ from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.feature_selection import SelectKBest
 from sklearn.ensemble import ExtraTreesClassifier
-from scipy.stats import randint, uniform
 
 from Parameters.Classification import CLParameters
 

@@ -1,6 +1,5 @@
 import psycopg2
 import pandas as pd
-from psycopg2.extensions import register_adapter, AsIs
 from multiprocessing import Pool
 from sqlalchemy import create_engine
 import logging
@@ -168,6 +167,9 @@ class Dao:
 
         else:
             return self.get_matches()
+
+    def get_features(self, table_name):
+        return pd.read_sql(table_name, self.con_sql_alchemy, index_col='match_id')
 
     def get_previous_matches(self, team_id, date, count):
         """
