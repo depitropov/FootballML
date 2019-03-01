@@ -1,9 +1,9 @@
 import psycopg2
-from psycopg2 import sql
 import pandas as pd
+from psycopg2.extensions import register_adapter, AsIs
 from multiprocessing import Pool
-from DataManagement import DbUtils
 from sqlalchemy import create_engine
+import logging
 
 
 class DbInitiator:
@@ -100,7 +100,7 @@ class DbInitiator:
         self.con.commit()
 
 
-class DbGetters:
+class Dao:
     def __init__(self, config):
         self.config = config
         self.p = Pool(self.config['processors'])
@@ -120,8 +120,8 @@ class DbGetters:
         return pd.read_sql_query('SELECT * FROM countries;', self.con, index_col='country_id')
 
     def get_countries_unique(self, matches):
-        return DbUtils.clean_df_db_duplicates(matches[['country_name']].drop_duplicates(), "countries",
-                                              self.con_sql_alchemy, dup_cols=["country_name"])
+        return self.clean_df_db_duplicates(matches[['country_name']].drop_duplicates(), "countries",
+                                           dup_cols=["country_name"])
 
     def write_countries(self, countries):
         countries.to_sql('countries', self.con_sql_alchemy, index_label='country_id', if_exists='append')
@@ -130,8 +130,8 @@ class DbGetters:
         return pd.read_sql_query('SELECT * FROM leagues;', self.con, index_col='league_id')
 
     def get_leagues_unique(self, matches):
-        return DbUtils.clean_df_db_duplicates(matches[['league_name']].drop_duplicates(), "leagues",
-                                       self.con_sql_alchemy, dup_cols=["league_name"])
+        return self.clean_df_db_duplicates(matches[['league_name']].drop_duplicates(), "leagues",
+                                           dup_cols=["league_name"])
 
     def write_leagues(self, leagues):
         leagues.to_sql('leagues', self.con_sql_alchemy, index_label='league_id', if_exists='append')
@@ -140,8 +140,7 @@ class DbGetters:
         return pd.read_sql_query('SELECT * FROM teams;', self.con, index_col='team_id')
 
     def get_teams_unique(self, teams):
-        return DbUtils.clean_df_db_duplicates(teams, "teams",
-                                       self.con_sql_alchemy, dup_cols=["team_name"])
+        return self.clean_df_db_duplicates(teams, "teams", dup_cols=["team_name"])
 
     def write_teams(self, teams):
         teams.to_sql('teams', self.con_sql_alchemy, index_label='team_id', if_exists='append')
@@ -150,24 +149,25 @@ class DbGetters:
         return pd.read_sql_query('SELECT * FROM matches;', self.con, index_col='match_id')
 
     def get_matches_unique(self, matches):
-        return DbUtils.clean_df_db_duplicates(matches,
-                                              "matches",
-                                              self.con_sql_alchemy, dup_cols=["date", "home_team_id"],
-                                              log=True)
+        return self.clean_df_db_duplicates(matches, "matches", dup_cols=["date", "home_team_id"], log=True)
 
     def write_matches(self, matches):
         matches.to_sql('matches', self.con_sql_alchemy, index_label='match_id', if_exists='append')
 
+    def write_features(self, features, table_name):
+        features.to_sql(table_name, self.con_sql_alchemy, index_label='match_id', if_exists='append')
+
     def get_matches_without_features(self, table_name):
 
-        query = sql.SQL("""SELECT matches.match_id, matches.date, matches.home_team_id, matches.away_team_id, 
-        matches.htftr, matches.b365h, matches.b365d, matches.b365a
-        FROM matches 
-        LEFT JOIN {} features ON features.match_id = matches.match_id 
-        WHERE features.match_id IS NULL;""").format(sql.Identifier(table_name)).as_string(self.con)
+        exists_query = """SELECT EXISTS (SELECT relname FROM pg_class WHERE relname = %(table_name)s);"""
+        if pd.read_sql_query(exists_query, self.con_sql_alchemy, params={"table_name": table_name}).loc[0]['exists']:
 
-        return pd.read_sql_query(query, self.con_sql_alchemy,
-                                 index_col='match_id')
+            matches = self.get_matches()
+
+            return self.clean_df_db_duplicates(matches, table_name, dup_cols=["match_id"], log=True)
+
+        else:
+            return self.get_matches()
 
     def get_previous_matches(self, team_id, date, count):
         """
@@ -175,14 +175,72 @@ class DbGetters:
         """
 
         query = """SELECT * FROM matches 
-        WHERE (home_team_id = %(team_id)s OR away_team_id = %(team_id)s) AND %(date)s < matches.date
+        WHERE (home_team_id = %(team_id)s OR away_team_id = %(team_id)s) AND %(date)s > matches.date
         ORDER BY date DESC 
         LIMIT %(count)s;"""
 
         params = {'team_id': team_id, 'date': date, 'count': count}
 
-        previous_matches_df = pd.read_sql_query(query, self.con, index_col='match_id', params=params)
-        return previous_matches_df
+        return pd.read_sql_query(query, self.con, index_col='match_id', params=params)
 
+    def clean_df_db_duplicates(self, df, table_name, dup_cols=[],
+                               filter_continuous_col=None, filter_categorical_col=None, log=False):
+        """
+        Remove rows from a dataframe that already exist in a database
+        Required:
+            df : dataframe to remove duplicate rows from
+            engine: SQLAlchemy engine object
+            tablename: tablename to check duplicates in
+            dup_cols: list or tuple of column names to check for duplicate row values
+        Optional:
+            filter_continuous_col: the name of the continuous data column for BETWEEEN min/max filter
+                                   can be either a datetime, int, or float data type
+                                   useful for restricting the database table size to check
+            filter_categorical_col : the name of the categorical data column for Where = value check
+                                     Creates an "IN ()" check on the unique values in this column
+        Returns
+            Unique list of values from dataframe compared to database table
+        """
+        args = 'SELECT %s FROM %s' % (', '.join(['"{0}"'.format(col) for col in dup_cols]), table_name)
+        args_contain_filter, args_cat_filter = None, None
+        if filter_continuous_col is not None:
+            if df[filter_continuous_col].dtype == 'datetime64[ns]':
+                args_contain_filter = """ "%s" BETWEEN Convert(datetime, '%s')
+                                                  AND Convert(datetime, '%s')""" % (filter_continuous_col,
+                                                                                    df[filter_continuous_col].min(),
+                                                                                    df[filter_continuous_col].max())
 
+        if filter_categorical_col is not None:
+            args_cat_filter = ' "%s" in(%s)' % (filter_categorical_col,
+                                                ', '.join(["'{0}'".format(value) for value in
+                                                           df[filter_categorical_col].unique()]))
 
+        if args_contain_filter and args_cat_filter:
+            args += ' Where ' + args_contain_filter + ' AND' + args_cat_filter
+        elif args_contain_filter:
+            args += ' Where ' + args_contain_filter
+        elif args_cat_filter:
+            args += ' Where ' + args_cat_filter
+
+        df.drop_duplicates(dup_cols, keep='last', inplace=True)
+
+        database_data = pd.read_sql(args, self.con_sql_alchemy)
+
+        if len(database_data.index) > 0:
+            df = pd.merge(df, pd.read_sql(args, self.con_sql_alchemy), how='left', on=dup_cols, indicator=True)
+        else:
+            return df
+
+        if log:
+            df_with_error_records = df[df['_merge'] == 'both'][dup_cols]
+            if df_with_error_records.size > 0:
+                pd.set_option('display.max_rows', None)
+                pd.set_option('display.max_columns', None)
+                logging.warning("The following records already have duplicates in table {0} on columns {1}: \n {2}".
+                                format(table_name, dup_cols, df[df['_merge'] == 'both'][dup_cols].to_string))
+                pd.reset_option('display.max_rows')
+                pd.reset_option('display.max_columns')
+
+        df = df[df['_merge'] == 'left_only']
+        df.drop(['_merge'], axis=1, inplace=True)
+        return df

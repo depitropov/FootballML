@@ -1,27 +1,26 @@
 #! /usr/bin/python3
 
 import pandas as pd
-import dao
 import numpy as np
 from os import listdir
-from DataManagement import Converters, FeatureManager
+from DataManagement.Utils import Converters
 from multiprocessing import Pool
 
 
 class FileImporter:
 
-    def __init__(self, config, db_getters):
+    def __init__(self, config, db_initiator, dao):
         self.config = config
         self.p = Pool(self.config['processors'])
-        self.db_getters = db_getters
-        self.db_initiator = dao.DbInitiator(config)
+        self.db_initiator = db_initiator
+        self.dao = dao
 
     def update_countries(self, matches):
-        countries_unique = self.db_getters.get_countries_unique(matches)
+        countries_unique = self.dao.get_countries_unique(matches)
 
-        self.db_getters.write_countries(countries_unique)
+        self.dao.write_countries(countries_unique)
 
-        countries_updated = self.db_getters.get_countries()
+        countries_updated = self.dao.get_countries()
 
         matches = matches.reset_index().merge(countries_updated.reset_index().rename(columns={'index': 'country_id'}),
                                               left_on='country_name',
@@ -30,11 +29,11 @@ class FileImporter:
         return matches
 
     def update_leagues(self, matches):
-        leagues_unique = self.db_getters.get_leagues_unique(matches)
+        leagues_unique = self.dao.get_leagues_unique(matches)
 
-        self.db_getters.write_leagues(leagues_unique)
+        self.dao.write_leagues(leagues_unique)
 
-        leagues_updated = self.db_getters.get_leagues()
+        leagues_updated = self.dao.get_leagues()
 
         matches = matches.reset_index().merge(leagues_updated.reset_index().rename(columns={'index': 'league_id'}),
                                               left_on='league_name',
@@ -48,11 +47,11 @@ class FileImporter:
             matches[['away_team_name']].rename(columns={'away_team_name': 'team_name'}), ignore_index=True)) \
             .drop_duplicates()
 
-        teams_unique = self.db_getters.get_teams_unique(teams)
+        teams_unique = self.dao.get_teams_unique(teams)
 
-        self.db_getters.write_teams(teams_unique)
+        self.dao.write_teams(teams_unique)
 
-        teams_updated = self.db_getters.get_teams()
+        teams_updated = self.dao.get_teams()
 
         matches = matches.reset_index().merge(teams_updated.reset_index().rename(columns={'team_id': 'home_team_id'}),
                                               left_on='home_team_name',
@@ -109,28 +108,6 @@ class FileImporter:
         matches = self.update_leagues(matches)
         matches = self.update_teams(matches)
 
-        matches_unique = self.db_getters.get_matches_unique(matches)
+        matches_unique = self.dao.get_matches_unique(matches)
 
-        self.db_getters.write_matches(matches_unique)
-
-        feature_manager = FeatureManager.FeatureCalculator()
-
-        #self.generate_features(10, feature_manager)
-
-    def generate_features(self, count, feature_manager):
-        def calculate_features(row):
-            last_matches_home = self.db_getters.get_previous_matches(row.home_team_id, row.date, count)
-            last_matches_away = self.db_getters.get_previous_matches(row.away_team_id, row.date, count)
-
-            if len(last_matches_away.index) < count or len(last_matches_home.index) < count:
-                return np.nan
-
-            features_home = feature_manager.calculate_features(last_matches_home, 'home', row.home_team_id)
-            features_away = feature_manager.calculate_features(last_matches_away, 'away', row.away_team_id)
-
-            return row.append(features_home).append(features_away)
-
-        matches_without_features = self.db_getters.get_matches_without_features("features_last_10_matches")
-        features_calculated = matches_without_features.apply(calculate_features, axis=1)
-        features_cleaned = features_calculated[features_calculated.date.notnull()]
-        print(features_cleaned.columns)
+        self.dao.write_matches(matches_unique)
