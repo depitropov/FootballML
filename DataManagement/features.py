@@ -2,7 +2,6 @@
 
 import pandas as pd
 import numpy as np
-from multiprocessing import Pool
 import time
 
 
@@ -10,7 +9,6 @@ class FeatureManager:
 
     def __init__(self, dao, feature_calculator, table_name, count):
         self.dao = dao
-        self.pool = Pool(7)
         self.feature_calculator = feature_calculator
         self.count = count
         self.table_name = table_name
@@ -53,9 +51,10 @@ class FeatureManager:
         start = time.time()
         matches_without_features = self.dao.get_matches_without_features(self.table_name)
         result = self.calculate_features(matches_without_features)
-        self.dao.write_features(result, self.table_name)
+        result = self.dao.write_features(result, self.table_name)
         end = time.time()
         print(end - start)
+        return result
 
 
 class FeatureCalculator:
@@ -72,9 +71,25 @@ class FeatureCalculator:
             '{0}_turn_around_percentage'.format(side): self.get_turn_around_percentage(df, team_id),
             '{0}_average_odds'.format(side): self.get_average_odds(df, team_id),
             '{0}_lose_draws'.format(side): self.get_lose_draws(df, team_id),
-            '{0}_win_draws'.format(side): self.get_win_draws(df, team_id)
+            '{0}_win_draws'.format(side): self.get_win_draws(df, team_id),
+            '{0}_side_half_time_wins'.format(side): self.get_side_half_time_wins(df, side, team_id),
+            '{0}_side_full_time_wins'.format(side): self.get_side_full_time_wins(df, side, team_id),
+            '{0}_side_half_time_draws'.format(side): self.get_side_half_time_draws(df, side, team_id),
+            '{0}_side_full_time_draws'.format(side): self.get_side_full_time_draws(df, side, team_id),
+            '{0}_side_scored_first_half'.format(side): self.get_side_scored_first_half(df, side, team_id),
+            '{0}_side_scored_second_half'.format(side): self.get_side_scored_second_half(df, side, team_id),
+            '{0}_side_recovery_percentage'.format(side): self.get_side_recovery_percentage(df, side, team_id),
+            '{0}_side_turn_around_percentage'.format(side): self.get_side_turn_around_percentage(df, side, team_id),
+            '{0}_side_average_odds'.format(side): self.get_side_average_odds(df, side, team_id),
+            '{0}_side_lose_draws'.format(side): self.get_side_lose_draws(df, side, team_id),
+            '{0}_side_win_draws'.format(side): self.get_side_win_draws(df, side, team_id)
         }
         return pd.Series(d)
+
+    side_dict = {
+        'home': 'home_team_id',
+        'away': 'away_team_id'
+    }
 
     def get_half_time_wins(self, df, team_id):
         return len(df.loc[(df.home_team_id == team_id) & (df.htr == 1)].index) + len(
@@ -121,9 +136,9 @@ class FeatureCalculator:
             return np.nan
         else:
             return (len(
-                df.loc[(df.home_team_id == team_id) & (df.htr == 2) & ((df.ftr == 3) | (df.ftr == 1))].index) + len(
+                df.loc[(df.home_team_id == team_id) & (df.htr == 1) & ((df.ftr == 3) | (df.ftr == 2))].index) + len(
                 df.loc[
-                    (df.away_team_id == team_id) & (df.htr == 1) & ((df.ftr == 3) | (df.ftr == 2))].index)) / possibles
+                    (df.away_team_id == team_id) & (df.htr == 2) & ((df.ftr == 3) | (df.ftr == 1))].index)) / possibles
 
     def get_average_odds(self, df, team_id):
         return (df.loc[df.home_team_id == team_id].b365h.mean() + df.loc[df.away_team_id == team_id].b365a.mean()) / 2
@@ -135,3 +150,96 @@ class FeatureCalculator:
     def get_win_draws(self, df, team_id):
         return len(df.loc[(df.home_team_id == team_id) & (df.htr == 1) & (df.ftr == 3)].index) + len(
             df.loc[(df.away_team_id == team_id) & (df.htr == 2) & (df.ftr == 3)].index)
+
+    def get_side_half_time_wins(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.home_team_id == team_id) & (df.htr == 1)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.htr == 2)].index)
+
+    def get_side_full_time_wins(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.home_team_id == team_id) & (df.ftr == 1)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.ftr == 2)].index)
+
+    def get_side_half_time_draws(self, df, side, team_id):
+        return len(df.loc[(df[self.side_dict[side]] == team_id) & (df.htr == 3)].index)
+
+    def get_side_full_time_draws(self, df, side, team_id):
+        return len(df.loc[(df[self.side_dict[side]] == team_id) & (df.ftr == 3)].index)
+
+    def get_side_scored_first_half(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.home_team_id == team_id) & (df.hthg > 0)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.htag > 0)].index)
+
+    def get_side_scored_second_half(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.home_team_id == team_id) & (df.fthg - df.hthg > 0)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.ftag - df.htag > 0)].index)
+
+    def get_side_recovery_percentage(self, df, side, team_id):
+
+        if side == 'home':
+            possibles = len(
+                df.loc[(df.home_team_id == team_id) & (df.htr == 2)].index)
+
+            if possibles == 0:
+                return np.nan
+            else:
+                return len(
+                    df.loc[(df.home_team_id == team_id) & (df.htr == 2) & (
+                                (df.ftr == 3) | (df.ftr == 1))].index) / possibles
+        else:
+            possibles = len(df.loc[(df.away_team_id == team_id) & (df.htr == 1)].index)
+
+            if possibles == 0:
+                return np.nan
+            else:
+                return len(df.loc[
+                               (df.away_team_id == team_id) & (df.htr == 1) & (
+                                       (df.ftr == 3) | (df.ftr == 2))].index) / possibles
+
+    def get_side_turn_around_percentage(self, df, side, team_id):
+
+        if side == 'home':
+
+            possibles = len(df.loc[(df.home_team_id == team_id) & (df.htr == 1)].index)
+
+            if possibles == 0:
+                return np.nan
+            else:
+                return len(
+                    df.loc[(df.home_team_id == team_id) & (df.htr == 1) & (
+                                (df.ftr == 3) | (df.ftr == 2))].index) / possibles
+        else:
+            possibles = len(df.loc[(df.away_team_id == team_id) & (df.htr == 2)].index)
+
+            if possibles == 0:
+                return np.nan
+            else:
+                return len(
+                    df.loc[
+                        (df.away_team_id == team_id) & (df.htr == 2) & (
+                                    (df.ftr == 3) | (df.ftr == 1))].index) / possibles
+
+    def get_side_average_odds(self, df, side, team_id):
+        if side == 'home':
+            return df.loc[df.home_team_id == team_id].b365h.mean()
+        else:
+            return df.loc[df.away_team_id == team_id].b365a.mean()
+
+    def get_side_lose_draws(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.home_team_id == team_id) & (df.htr == 2) & (df.ftr == 3)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.htr == 1) & (df.ftr == 3)].index)
+
+    def get_side_win_draws(self, df, side, team_id):
+        if side == 'home':
+            return len(df.loc[(df.away_team_id == team_id) & (df.htr == 2) & (df.ftr == 3)].index)
+        else:
+            return len(df.loc[(df.away_team_id == team_id) & (df.htr == 2) & (df.ftr == 3)].index)

@@ -82,8 +82,11 @@ class FileImporter:
                               inplace=True)  # Remove matches without half time or full time results
             temp_frame['league'] = temp_frame['Div']  # Create new column for league name
             temp_frame['country'] = temp_frame['Div']  # Create new column for country name
-            temp_frame.Date = pd.to_datetime(temp_frame.Date, infer_datetime_format=True).astype(pd.Timestamp)
             temp_frame.country = self.p.map(converters.country, temp_frame.country)
+            try:
+                temp_frame.Date = pd.to_datetime(temp_frame.Date, format='%d/%m/%y').astype(pd.Timestamp)
+            except ValueError:
+                temp_frame.Date = pd.to_datetime(temp_frame.Date, format='%d/%m/%Y').astype(pd.Timestamp)
             temp_frame.league = self.p.map(converters.league, temp_frame.league)
             temp_frame.HTR = self.p.map(converters.h_d_a, temp_frame.HTR)
             temp_frame.FTR = self.p.map(converters.h_d_a, temp_frame.FTR)
